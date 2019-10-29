@@ -107,4 +107,5 @@ data/test_max_x
 
 data/train_max_x
 
-.idea
+# idea
+.idea/
