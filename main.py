@@ -5,6 +5,10 @@ import torch
 from torch import nn, optim
 from time import time
 from sklearn.model_selection import train_test_split
+import pandas as pd
+from cnn import Net
+from torch.autograd import Variable
+from sklearn.metrics import accuracy_score
 
 # standard deviation
 STD = 0.5
@@ -17,104 +21,93 @@ OUTPUT_LAYER = 10
 EPOCH = 15
 
 
-def get_tensor_dataset(X, y):
-    X = torch.from_numpy(X)
-    y = torch.from_numpy(y)
-
-    # scaled image values
-    X = X / 255
-    # image values range: [0, 1]
-    X = ((X * STD) + MEAN)
-
-    # to run on GPU
-    X = X.cuda()
-    y = y.cuda()
-
-    return torch.utils.data.TensorDataset(X, y)  # create datset
-
-
 def main():
     # load images as a numpy array
-    train_dataset = np.array(np.load('data/train_max_x', allow_pickle=True))
-    targets = np.genfromtxt('data/train_max_y.csv', delimiter=',', skip_header=1)
+    train_dataset = np.array(np.load('/content/drive/My Drive/McGill/comp551/data/train_max_x', allow_pickle=True))
+    train_dataset = train_dataset / 255.0
+    train_dataset = train_dataset.astype('float32')
+    targets = pd.read_csv('/content/drive/My Drive/McGill/comp551/data/train_max_y.csv', delimiter=',',
+                          skipinitialspace=True)
+    targets = targets.to_numpy()
     # remove id column
     targets = targets[:, 1]
+    targets = targets.astype(int)
 
     X_train, X_test, y_train, y_test = train_test_split(train_dataset, targets, test_size=0.2, random_state=42)
+    # Clean memory
+    train_dataset = None
 
-    # get_tensor_dataset by default returns data to run on GPU
-    train_dataset = get_tensor_dataset(X_train, y_train)
-    val_dataset = get_tensor_dataset(X_test, y_test)
-    train_loader = torch.utils.data.DataLoader(train_dataset)
-    val_loader = torch.utils.data.DataLoader(val_dataset)
+    # converting training images into torch format
+    dim1, dim2, dim3 = X_train.shape
+    X_train = X_train.reshape(dim1, 1, dim2, dim3)
+    X_train = torch.from_numpy(X_train)
+    y_train = torch.from_numpy(y_train)
 
-    model = nn.Sequential(nn.Linear(INPUT_LAYER, H_LAYER_1),
-                          nn.ReLU(),
-                          nn.Linear(H_LAYER_1, H_LAYER_2),
-                          nn.ReLU(),
-                          nn.Linear(H_LAYER_2, OUTPUT_LAYER),
-                          nn.LogSoftmax(dim=1))
-    model = model.cuda()  # to run on GPU
+    # converting validation images into torch format
+    dim1, dim2, dim3 = X_test.shape
+    X_test = X_test.reshape(dim1, 1, dim2, dim3)
+    X_test = torch.from_numpy(X_test)
+    y_test = torch.from_numpy(y_test)
+
+    # defining the model
+    model = Net()
 
     criterion = nn.NLLLoss()
-    images, labels = next(iter(train_loader))
-    images = images.view(images.shape[0], -1)
-    print(images)
-    print('images shape: {0}'.format(images.shape))
-    print('labels shape: {0}'.format(labels.shape))
-
-    logps = model(images)  # log probabilities
-    labels = labels.long()
-    loss = criterion(logps, labels)  # calculate the NLL loss
-
-    print('Before backward pass: \n', model[0].weight.grad)
-    loss.backward()
-    print('After backward pass: \n', model[0].weight.grad)
-
     optimizer = optim.SGD(model.parameters(), lr=0.003, momentum=0.9)
+
+    if torch.cuda.is_available():
+        model = model.cuda()
+        criterion = criterion.cuda()
+    print(model)
+
     time0 = time()
-    epochs = EPOCH
+    epochs = 1
     for e in range(epochs):
+        model.train()
         running_loss = 0
-        for images, labels in train_loader:
-            # Flatten images into a 16384 long vector
-            labels = labels.long()
-            images = images.view(images.shape[0], -1)
 
-            # Training pass
-            optimizer.zero_grad()
+        x_train, y_train = Variable(X_train).cuda(), Variable(y_train).cuda()
+        x_val, y_val = Variable(X_test).cuda(), Variable(y_test).cuda()
+        # converting the data into GPU format
+        # if torch.cuda.is_available():
+        #     x_train = x_train.cuda()
+        #     y_train = y_train.cuda()
+        #     x_val = x_val.cuda()
+        #     y_val = y_val.cuda()
 
-            output = model(images)
-            loss = criterion(output, labels)
+        # clearing the Gradients of the model parameters
+        optimizer.zero_grad()
 
-            # This is where the model learns by backpropagating
-            loss.backward()
+        # prediction for training and validation set
+        output_train = model(x_train)
+        output_val = model(x_val)
 
-            # And optimizes its weights here
-            optimizer.step()
+        # computing the training and validation loss
+        loss_train = criterion(output_train, y_train)
+        loss_val = criterion(output_val, y_val)
 
-            running_loss += loss.item()
-        else:
-            print("Epoch {} - Training loss: {}".format(e, running_loss / len(train_dataset)))
+        # computing the updated weights of all the model parameters
+        loss_train.backward()
+
+        # And optimizes its weights here
+        optimizer.step()
+
+        running_loss += loss_train.item()
+        print("Epoch {} - Training loss: {}".format(e, running_loss / len(train_dataset)))
+
     print("\nTraining Time (in minutes) =", (time() - time0) / 60)
 
-    correct_count, all_count = 0, 0
-    for images, labels in val_loader:
-        for i in range(len(labels)):
-            img = images[i].view(1, INPUT_LAYER)
-            with torch.no_grad():
-                logps = model(img)
+    # prediction for validation set
+    with torch.no_grad():
+        output = model(x_val.cuda())
 
-            ps = torch.exp(logps)
-            probab = list(ps.numpy()[0])
-            pred_label = probab.index(max(probab))
-            true_label = labels.numpy()[i]
-            if true_label == pred_label:
-                correct_count += 1
-            all_count += 1
+    ps = torch.exp(output).cpu()
+    probab = list(ps.numpy())
+    predictions = np.argmax(probab, axis=1)
 
-    print("Number Of Images Tested =", all_count)
-    print("\nModel Accuracy =", (correct_count / all_count))
+    # accuracy on validation set
+
+    print("\nModel Accuracy =", (accuracy_score(y_val, predictions)))
 
 
 if __name__ == '__main__':
