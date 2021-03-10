@@ -1,2 +1,3 @@
 # Modified-MNIST
-COMP 551 - Applied Machine Learning Project 3
+
+The goal of this project is to perform an image analysis prediction challenge. The task is based upon the MNIST dataset (<https://en.wikipedia.org/wiki/MNIST_database>). The original MNIST contains handwritten numeric digits from 0-9 and the goal is to classify which digit is present in an image. Here, we are working with a Modified MNIST dataset. In this modified dataset, the images contain three digits, and the goal is to output the digit in the image with the highest numeric value. Each example is represented as a matrix of pixel intensity values (i.e., the images are grey-scale not color). We designed and implemented a supervised classification model to perform the Modified MNIST prediction task. For more details, see _CNN_94.5_Anton.ipynb_ and _Analysis_of_Image_Classification_with_a_Modified_MNIST_Dataset_containing_Handwritten_Digits.pdf_ .
